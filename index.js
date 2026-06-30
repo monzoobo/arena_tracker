@@ -21,6 +21,7 @@ function localNetworkAddresses() {
 
 function serverInfo() {
   const addresses = HOST === "0.0.0.0" ? localNetworkAddresses() : [];
+  const publicBaseUrl = PUBLIC_JOIN_BASE_URL.replace(/\/+$/, "");
   return {
     ok: true,
     service: "Arena Tracker Skin Guess Rooms",
@@ -32,6 +33,13 @@ function serverInfo() {
       websocket: `ws://localhost:${PORT}`,
       test: `http://localhost:${PORT}/test`
     },
+    public: publicBaseUrl
+      ? {
+          http: publicBaseUrl,
+          websocket: publicBaseUrl.replace(/^https:/, "wss:").replace(/^http:/, "ws:"),
+          test: `${publicBaseUrl}/test`
+        }
+      : null,
     lan: addresses.map((address) => ({
       address,
       http: `http://${address}:${PORT}`,
@@ -380,7 +388,8 @@ function handleMessage(socket, rawMessage) {
 }
 
 const server = http.createServer((request, response) => {
-  if (request.url === "/test") {
+  const requestPath = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`).pathname;
+  if (requestPath === "/test" || requestPath === "/test/") {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end(testPageHtml());
     return;
