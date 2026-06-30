@@ -436,7 +436,7 @@ function updateRoomSettings(socket, payload) {
   context.room.settings = {
     ...context.room.settings,
     questionCount: Number.isFinite(questionCount)
-      ? Math.min(999, Math.max(1, questionCount))
+      ? Math.min(999, Math.max(0, questionCount))
       : context.room.settings.questionCount,
     gameMode,
     answerType,
