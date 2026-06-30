@@ -194,9 +194,21 @@ function normalizeRoomName(roomName) {
   return name.slice(0, 48) || "Skin Guess";
 }
 
-function playerNameExists(room, playerName) {
+function playerNameExists(room, playerName, ignoredPlayerId = "") {
   const normalized = normalizePlayerName(playerName).toLowerCase();
-  return room.players.some((player) => player.name.toLowerCase() === normalized);
+  return room.players.some((player) => player.id !== ignoredPlayerId && player.name.toLowerCase() === normalized);
+}
+
+function defaultRoomSettings() {
+  return {
+    questionCount: 0,
+    timer: "off",
+    gameMode: "",
+    answerType: "",
+    timeMode: "perImage",
+    timeValue: "15",
+    finishRule: "last"
+  };
 }
 
 function joinLinkFor(roomCode) {
@@ -214,15 +226,7 @@ function publicRoomState(room, viewerPlayerId = null) {
     roomCode: room.roomCode,
     hostPlayerId: room.hostPlayerId,
     viewerPlayerId,
-    settings: room.settings || {
-      questionCount: 0,
-      timer: "off",
-      gameMode: "",
-      answerType: "",
-      timeMode: "perImage",
-      timeValue: "15",
-      finishRule: "last"
-    },
+    settings: room.settings || defaultRoomSettings(),
     gameSeed: room.gameSeed || "",
     startedAt: room.startedAt || null,
     joinLink: room.joinLink,
@@ -230,7 +234,8 @@ function publicRoomState(room, viewerPlayerId = null) {
       id: player.id,
       name: player.name,
       isHost: player.id === room.hostPlayerId,
-      ready: player.ready === true
+      ready: player.ready === true,
+      returnedToLobby: player.returnedToLobby === true
     })),
     createdAt: room.createdAt
   };
@@ -240,6 +245,30 @@ function broadcastRoomState(room) {
   for (const player of room.players) {
     send(player.socket, publicRoomState(room, player.id));
   }
+}
+
+function resetRoomForNextGame(room) {
+  room.status = "lobby";
+  room.startedAt = null;
+  room.gameSeed = "";
+  room.settings = defaultRoomSettings();
+  for (const player of room.players) {
+    player.ready = false;
+    player.returnedToLobby = true;
+  }
+}
+
+function resetRoomIfEveryoneReturned(room) {
+  if (room.status !== "started" || room.players.length === 0) {
+    return false;
+  }
+
+  if (!room.players.every((player) => player.returnedToLobby === true)) {
+    return false;
+  }
+
+  resetRoomForNextGame(room);
+  return true;
 }
 
 function leaveCurrentRoom(socket) {
@@ -266,6 +295,7 @@ function leaveCurrentRoom(socket) {
     room.hostPlayerId = room.players[0].id;
   }
 
+  resetRoomIfEveryoneReturned(room);
   broadcastRoomState(room);
 }
 
@@ -274,6 +304,7 @@ function createPlayer(socket, playerName) {
     id: crypto.randomUUID(),
     name: playerName,
     ready: false,
+    returnedToLobby: true,
     socket
   };
 }
@@ -308,15 +339,7 @@ function createRoom(socket, payload) {
     password: String(payload.password || ""),
     hostPlayerId: player.id,
     status: "lobby",
-    settings: {
-      questionCount: 0,
-      timer: "off",
-      gameMode: "",
-      answerType: "",
-      timeMode: "perImage",
-      timeValue: "15",
-      finishRule: "last"
-    },
+    settings: defaultRoomSettings(),
     gameSeed: "",
     startedAt: null,
     players: [player],
@@ -410,6 +433,51 @@ function setReady(socket, payload) {
   broadcastRoomState(context.room);
 }
 
+function renamePlayer(socket, payload) {
+  const context = requireRoom(socket);
+  if (!context) {
+    return;
+  }
+
+  const nameValidation = validatePlayerName(payload.playerName);
+  if (!nameValidation.ok) {
+    sendError(socket, "INVALID_PLAYER_NAME", nameValidation.message);
+    return;
+  }
+
+  if (playerNameExists(context.room, nameValidation.name, context.client.playerId)) {
+    sendError(socket, "PLAYER_NAME_EXISTS", "Ce nom est dÃ©jÃ  utilisÃ© dans la room.");
+    return;
+  }
+
+  const player = context.room.players.find((entry) => entry.id === context.client.playerId);
+  if (!player) {
+    sendError(socket, "PLAYER_NOT_FOUND", "Joueur introuvable dans la room.");
+    return;
+  }
+
+  player.name = nameValidation.name;
+  broadcastRoomState(context.room);
+}
+
+function returnToLobby(socket) {
+  const context = requireRoom(socket);
+  if (!context) {
+    return;
+  }
+
+  const player = context.room.players.find((entry) => entry.id === context.client.playerId);
+  if (!player) {
+    sendError(socket, "PLAYER_NOT_FOUND", "Joueur introuvable dans la room.");
+    return;
+  }
+
+  player.ready = false;
+  player.returnedToLobby = true;
+  resetRoomIfEveryoneReturned(context.room);
+  broadcastRoomState(context.room);
+}
+
 function updateRoomSettings(socket, payload) {
   const context = requireRoom(socket);
   if (!context) {
@@ -490,6 +558,10 @@ function startRoomGame(socket) {
   context.room.status = "started";
   context.room.startedAt = new Date().toISOString();
   context.room.gameSeed = crypto.randomBytes(16).toString("hex");
+  for (const player of context.room.players) {
+    player.ready = false;
+    player.returnedToLobby = false;
+  }
   broadcastRoomState(context.room);
 }
 
@@ -525,6 +597,16 @@ function handleMessage(socket, rawMessage) {
 
   if (type === "setReady") {
     setReady(socket, payload);
+    return;
+  }
+
+  if (type === "renamePlayer") {
+    renamePlayer(socket, payload);
+    return;
+  }
+
+  if (type === "returnToLobby") {
+    returnToLobby(socket);
     return;
   }
 
