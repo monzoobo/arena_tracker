@@ -235,7 +235,9 @@ function publicRoomState(room, viewerPlayerId = null) {
       name: player.name,
       isHost: player.id === room.hostPlayerId,
       ready: player.ready === true,
-      returnedToLobby: player.returnedToLobby === true
+      returnedToLobby: player.returnedToLobby === true,
+      score: Math.round(Number(player.score) || 0),
+      finished: player.finished === true
     })),
     createdAt: room.createdAt
   };
@@ -255,6 +257,8 @@ function resetRoomForNextGame(room) {
   for (const player of room.players) {
     player.ready = false;
     player.returnedToLobby = true;
+    player.score = 0;
+    player.finished = false;
   }
 }
 
@@ -305,6 +309,8 @@ function createPlayer(socket, playerName) {
     name: playerName,
     ready: false,
     returnedToLobby: true,
+    score: 0,
+    finished: false,
     socket
   };
 }
@@ -478,6 +484,24 @@ function returnToLobby(socket) {
   broadcastRoomState(context.room);
 }
 
+function submitScore(socket, payload) {
+  const context = requireRoom(socket);
+  if (!context) {
+    return;
+  }
+
+  const player = context.room.players.find((entry) => entry.id === context.client.playerId);
+  if (!player) {
+    sendError(socket, "PLAYER_NOT_FOUND", "Joueur introuvable dans la room.");
+    return;
+  }
+
+  const score = Number.parseInt(payload.score, 10);
+  player.score = Number.isFinite(score) ? Math.max(0, score) : 0;
+  player.finished = true;
+  broadcastRoomState(context.room);
+}
+
 function updateRoomSettings(socket, payload) {
   const context = requireRoom(socket);
   if (!context) {
@@ -561,6 +585,8 @@ function startRoomGame(socket) {
   for (const player of context.room.players) {
     player.ready = false;
     player.returnedToLobby = false;
+    player.score = 0;
+    player.finished = false;
   }
   broadcastRoomState(context.room);
 }
@@ -607,6 +633,11 @@ function handleMessage(socket, rawMessage) {
 
   if (type === "returnToLobby") {
     returnToLobby(socket);
+    return;
+  }
+
+  if (type === "submitScore") {
+    submitScore(socket, payload);
     return;
   }
 
