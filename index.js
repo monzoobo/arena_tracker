@@ -214,7 +214,7 @@ function publicRoomState(room, viewerPlayerId = null) {
     roomCode: room.roomCode,
     hostPlayerId: room.hostPlayerId,
     viewerPlayerId,
-    settings: room.settings || { questionCount: 10, timer: "off" },
+    settings: room.settings || { questionCount: 10, timer: "off", gameMode: "classic", answerType: "complete" },
     startedAt: room.startedAt || null,
     joinLink: room.joinLink,
     players: room.players.map((player) => ({
@@ -301,7 +301,9 @@ function createRoom(socket, payload) {
     status: "lobby",
     settings: {
       questionCount: 10,
-      timer: "off"
+      timer: "off",
+      gameMode: "classic",
+      answerType: "complete"
     },
     startedAt: null,
     players: [player],
@@ -407,13 +409,47 @@ function updateRoomSettings(socket, payload) {
   }
 
   const questionCount = Number.parseInt(payload.questionCount, 10);
+  const gameMode = ["classic", "timed"].includes(payload.gameMode)
+    ? payload.gameMode
+    : context.room.settings.gameMode;
+  const answerType = ["champion", "skinline", "complete"].includes(payload.answerType)
+    ? payload.answerType
+    : context.room.settings.answerType;
   context.room.settings = {
     ...context.room.settings,
     questionCount: Number.isFinite(questionCount)
       ? Math.min(999, Math.max(1, questionCount))
       : context.room.settings.questionCount,
+    gameMode,
+    answerType,
     timer: "off"
   };
+  broadcastRoomState(context.room);
+}
+
+function kickPlayer(socket, payload) {
+  const context = requireRoom(socket);
+  if (!context) {
+    return;
+  }
+
+  if (context.room.hostPlayerId !== context.client.playerId) {
+    sendError(socket, "HOST_ONLY", "Seul l'host peut exclure un joueur.");
+    return;
+  }
+
+  const playerId = String(payload.playerId || "");
+  if (!playerId || playerId === context.room.hostPlayerId) {
+    return;
+  }
+
+  const kicked = context.room.players.find((player) => player.id === playerId);
+  context.room.players = context.room.players.filter((player) => player.id !== playerId);
+  if (kicked) {
+    clients.set(kicked.socket, { roomCode: null, playerId: null });
+    sendError(kicked.socket, "KICKED", "Tu as ete retire de la room.");
+    kicked.socket.close();
+  }
   broadcastRoomState(context.room);
 }
 
@@ -470,6 +506,11 @@ function handleMessage(socket, rawMessage) {
 
   if (type === "updateRoomSettings") {
     updateRoomSettings(socket, payload);
+    return;
+  }
+
+  if (type === "kickPlayer") {
+    kickPlayer(socket, payload);
     return;
   }
 
