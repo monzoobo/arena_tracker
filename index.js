@@ -223,6 +223,7 @@ function publicRoomState(room, viewerPlayerId = null) {
       timeValue: "15",
       finishRule: "last"
     },
+    gameSeed: room.gameSeed || "",
     startedAt: room.startedAt || null,
     joinLink: room.joinLink,
     players: room.players.map((player) => ({
@@ -316,6 +317,7 @@ function createRoom(socket, payload) {
       timeValue: "15",
       finishRule: "last"
     },
+    gameSeed: "",
     startedAt: null,
     players: [player],
     createdAt: new Date().toISOString(),
@@ -487,6 +489,7 @@ function startRoomGame(socket) {
 
   context.room.status = "started";
   context.room.startedAt = new Date().toISOString();
+  context.room.gameSeed = crypto.randomBytes(16).toString("hex");
   broadcastRoomState(context.room);
 }
 
