@@ -214,7 +214,15 @@ function publicRoomState(room, viewerPlayerId = null) {
     roomCode: room.roomCode,
     hostPlayerId: room.hostPlayerId,
     viewerPlayerId,
-    settings: room.settings || { questionCount: 10, timer: "off", gameMode: "classic", answerType: "complete" },
+    settings: room.settings || {
+      questionCount: 0,
+      timer: "off",
+      gameMode: "",
+      answerType: "",
+      timeMode: "perImage",
+      timeValue: "15",
+      finishRule: "last"
+    },
     startedAt: room.startedAt || null,
     joinLink: room.joinLink,
     players: room.players.map((player) => ({
@@ -300,10 +308,13 @@ function createRoom(socket, payload) {
     hostPlayerId: player.id,
     status: "lobby",
     settings: {
-      questionCount: 10,
+      questionCount: 0,
       timer: "off",
-      gameMode: "classic",
-      answerType: "complete"
+      gameMode: "",
+      answerType: "",
+      timeMode: "perImage",
+      timeValue: "15",
+      finishRule: "last"
     },
     startedAt: null,
     players: [player],
@@ -415,6 +426,13 @@ function updateRoomSettings(socket, payload) {
   const answerType = ["champion", "skinline", "complete"].includes(payload.answerType)
     ? payload.answerType
     : context.room.settings.answerType;
+  const timeMode = ["total", "perImage"].includes(payload.timeMode)
+    ? payload.timeMode
+    : context.room.settings.timeMode;
+  const finishRule = ["first", "last"].includes(payload.finishRule)
+    ? payload.finishRule
+    : context.room.settings.finishRule;
+  const timeValue = String(payload.timeValue || context.room.settings.timeValue || "15").slice(0, 12);
   context.room.settings = {
     ...context.room.settings,
     questionCount: Number.isFinite(questionCount)
@@ -422,6 +440,9 @@ function updateRoomSettings(socket, payload) {
       : context.room.settings.questionCount,
     gameMode,
     answerType,
+    timeMode,
+    timeValue,
+    finishRule,
     timer: "off"
   };
   broadcastRoomState(context.room);
