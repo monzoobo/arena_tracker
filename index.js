@@ -206,26 +206,30 @@ function joinLinkFor(roomCode) {
     : `${PROTOCOL_JOIN_BASE_URL}?${query}`;
 }
 
-function publicRoomState(room) {
+function publicRoomState(room, viewerPlayerId = null) {
   return {
     type: "roomState",
+    status: room.status || "lobby",
     roomName: room.roomName,
     roomCode: room.roomCode,
     hostPlayerId: room.hostPlayerId,
+    viewerPlayerId,
+    settings: room.settings || { questionCount: 10, timer: "off" },
+    startedAt: room.startedAt || null,
     joinLink: room.joinLink,
     players: room.players.map((player) => ({
       id: player.id,
       name: player.name,
-      isHost: player.id === room.hostPlayerId
+      isHost: player.id === room.hostPlayerId,
+      ready: player.ready === true
     })),
     createdAt: room.createdAt
   };
 }
 
 function broadcastRoomState(room) {
-  const state = publicRoomState(room);
   for (const player of room.players) {
-    send(player.socket, state);
+    send(player.socket, publicRoomState(room, player.id));
   }
 }
 
@@ -260,6 +264,7 @@ function createPlayer(socket, playerName) {
   return {
     id: crypto.randomUUID(),
     name: playerName,
+    ready: false,
     socket
   };
 }
@@ -293,6 +298,12 @@ function createRoom(socket, payload) {
     roomCode: codeValidation.code,
     password: String(payload.password || ""),
     hostPlayerId: player.id,
+    status: "lobby",
+    settings: {
+      questionCount: 10,
+      timer: "off"
+    },
+    startedAt: null,
     players: [player],
     createdAt: new Date().toISOString(),
     joinLink: joinLinkFor(codeValidation.code)
@@ -303,7 +314,7 @@ function createRoom(socket, payload) {
     roomCode: room.roomCode,
     playerId: player.id
   });
-  send(socket, publicRoomState(room));
+  send(socket, publicRoomState(room, player.id));
 }
 
 function joinRoom(socket, payload) {
@@ -346,6 +357,82 @@ function joinRoom(socket, payload) {
   broadcastRoomState(room);
 }
 
+function roomForSocket(socket) {
+  const client = clients.get(socket);
+  if (!client?.roomCode || !client?.playerId) {
+    return { room: null, client: null };
+  }
+
+  return {
+    room: rooms.get(client.roomCode) || null,
+    client
+  };
+}
+
+function requireRoom(socket) {
+  const { room, client } = roomForSocket(socket);
+  if (!room || !client) {
+    sendError(socket, "NOT_IN_ROOM", "Tu n'es pas dans une room.");
+    return null;
+  }
+
+  return { room, client };
+}
+
+function setReady(socket, payload) {
+  const context = requireRoom(socket);
+  if (!context) {
+    return;
+  }
+
+  const player = context.room.players.find((entry) => entry.id === context.client.playerId);
+  if (!player) {
+    sendError(socket, "PLAYER_NOT_FOUND", "Joueur introuvable dans la room.");
+    return;
+  }
+
+  player.ready = payload.ready === true;
+  broadcastRoomState(context.room);
+}
+
+function updateRoomSettings(socket, payload) {
+  const context = requireRoom(socket);
+  if (!context) {
+    return;
+  }
+
+  if (context.room.hostPlayerId !== context.client.playerId) {
+    sendError(socket, "HOST_ONLY", "Seul l'host peut modifier les options de room.");
+    return;
+  }
+
+  const questionCount = Number.parseInt(payload.questionCount, 10);
+  context.room.settings = {
+    ...context.room.settings,
+    questionCount: Number.isFinite(questionCount)
+      ? Math.min(999, Math.max(1, questionCount))
+      : context.room.settings.questionCount,
+    timer: "off"
+  };
+  broadcastRoomState(context.room);
+}
+
+function startRoomGame(socket) {
+  const context = requireRoom(socket);
+  if (!context) {
+    return;
+  }
+
+  if (context.room.hostPlayerId !== context.client.playerId) {
+    sendError(socket, "HOST_ONLY", "Seul l'host peut lancer la partie.");
+    return;
+  }
+
+  context.room.status = "started";
+  context.room.startedAt = new Date().toISOString();
+  broadcastRoomState(context.room);
+}
+
 function handleMessage(socket, rawMessage) {
   let message = null;
   try {
@@ -373,6 +460,21 @@ function handleMessage(socket, rawMessage) {
   if (type === "leaveRoom") {
     leaveCurrentRoom(socket);
     send(socket, { type: "roomState", roomName: "", roomCode: "", hostPlayerId: null, players: [], createdAt: null });
+    return;
+  }
+
+  if (type === "setReady") {
+    setReady(socket, payload);
+    return;
+  }
+
+  if (type === "updateRoomSettings") {
+    updateRoomSettings(socket, payload);
+    return;
+  }
+
+  if (type === "startGame") {
+    startRoomGame(socket);
     return;
   }
 
