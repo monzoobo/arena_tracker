@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: arena-tracker-skin-guess
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PUBLIC_JOIN_BASE_URL
+        value: https://arena-tracker-skin-guess.onrender.com

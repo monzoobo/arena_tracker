@@ -1,0 +1,13 @@
+{
+  "name": "arena-tracker-skin-guess-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ephemeral WebSocket rooms for Arena Tracker Skin Guess.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
