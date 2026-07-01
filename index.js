@@ -262,8 +262,15 @@ function resetRoomForNextGame(room) {
   }
 }
 
+function moveRoomToResults(room) {
+  room.status = "results";
+  for (const player of room.players) {
+    player.ready = false;
+  }
+}
+
 function resetRoomIfEveryoneReturned(room) {
-  if (room.status !== "started" || room.players.length === 0) {
+  if (!["started", "results"].includes(room.status) || room.players.length === 0) {
     return false;
   }
 
@@ -484,6 +491,21 @@ function returnToLobby(socket) {
   broadcastRoomState(context.room);
 }
 
+function forceReturnToLobby(socket) {
+  const context = requireRoom(socket);
+  if (!context) {
+    return;
+  }
+
+  if (context.room.hostPlayerId !== context.client.playerId) {
+    sendError(socket, "HOST_ONLY", "Seul l'host peut terminer la partie.");
+    return;
+  }
+
+  resetRoomForNextGame(context.room);
+  broadcastRoomState(context.room);
+}
+
 function submitScore(socket, payload) {
   const context = requireRoom(socket);
   if (!context) {
@@ -499,6 +521,13 @@ function submitScore(socket, payload) {
   const score = Number.parseInt(payload.score, 10);
   player.score = Number.isFinite(score) ? Math.max(0, score) : 0;
   player.finished = true;
+  if (
+    context.room.status === "started" &&
+    context.room.players.length > 0 &&
+    context.room.players.every((entry) => entry.finished === true)
+  ) {
+    moveRoomToResults(context.room);
+  }
   broadcastRoomState(context.room);
 }
 
@@ -633,6 +662,11 @@ function handleMessage(socket, rawMessage) {
 
   if (type === "returnToLobby") {
     returnToLobby(socket);
+    return;
+  }
+
+  if (type === "forceReturnToLobby") {
+    forceReturnToLobby(socket);
     return;
   }
 
